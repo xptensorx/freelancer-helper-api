@@ -77,6 +77,8 @@ class FreelancerApiClient:
         params: Optional[ParamsType] = None,
     ) -> Dict[str, Any]:
         last_exc: Optional[BaseException] = None
+        last_status: Optional[int] = None
+        last_text: Optional[str] = None
 
         for attempt in range(self.max_retries + 1):
             self.limiter.wait()
@@ -88,6 +90,13 @@ class FreelancerApiClient:
                     params=params,
                     timeout=self.timeout_s,
                 )
+
+                last_status = resp.status_code
+                # keep only a small snippet to avoid huge logs
+                try:
+                    last_text = (resp.text or "")[:500]
+                except Exception:
+                    last_text = None
 
                 if resp.status_code in (429, 500, 502, 503, 504):
                     # Rate limit or transient failure
@@ -111,7 +120,10 @@ class FreelancerApiClient:
 
         if last_exc:
             raise last_exc
-        raise RuntimeError(f"Request failed after retries: {method} {url}")
+        raise RuntimeError(
+            f"Request failed after retries: {method} {url} "
+            f"(last_status={last_status}, last_body={last_text!r})"
+        )
 
     def _compute_retry_sleep(self, resp: requests.Response, attempt: int) -> float:
         retry_after = resp.headers.get("Retry-After")

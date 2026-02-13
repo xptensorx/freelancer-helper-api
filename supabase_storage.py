@@ -9,7 +9,7 @@ from supabase_client import get_supabase_client
 _warned_missing = False
 
 
-def upsert_users(user_rows: Iterable[Dict[str, Any]]) -> None:
+def upsert_users(user_rows: Iterable[Dict[str, Any]]) -> bool:
     """
     Upsert reviewer user rows into Supabase.
 
@@ -31,7 +31,7 @@ def upsert_users(user_rows: Iterable[Dict[str, Any]]) -> None:
 
     rows = [r for r in user_rows if isinstance(r, dict) and r.get("id") is not None]
     if not rows:
-        return
+        return True
 
     try:
         sb = get_supabase_client()
@@ -40,9 +40,16 @@ def upsert_users(user_rows: Iterable[Dict[str, Any]]) -> None:
         if not _warned_missing:
             print(f"[supabase] disabled: {e}")
             _warned_missing = True
-        return
+        return False
 
     table = str(CONFIG.get("supabase_table_users", "clients"))
     # on_conflict ensures id-based upsert
-    sb.table(table).upsert(rows, on_conflict="id").execute()
+    try:
+        sb.table(table).upsert(rows, on_conflict="id").execute()
+    except Exception as e:
+        # Don't crash the whole lead generation if Supabase has a transient failure.
+        print(f"[supabase] upsert failed (table={table}): {e}")
+        return False
+
+    return True
 

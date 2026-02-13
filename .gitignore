@@ -1,8 +1,10 @@
 config.py
 state.json
 leads.jsonl
+errors.jsonl
 user_cache.json
 user_cache.db
 user_cache.db-wal
 user_cache.db-shm
 .env
+.env.*

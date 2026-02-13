@@ -1,3 +1,4 @@
+import time
 from typing import Any, Dict, List
 
 from config import CONFIG
@@ -33,8 +34,9 @@ def run_lead_generation() -> None:
     """
 
     state_path = str(CONFIG.get("state_path", "state.json"))
-    leads_path = str(CONFIG.get("leads_output_path", "leads.jsonl"))
     cache_path = str(CONFIG.get("user_cache_path", "user_cache.db"))
+    errors_path = str(CONFIG.get("errors_output_path", "errors.jsonl"))
+    cooldown_on_reviews_failure_s = int(CONFIG.get("cooldown_on_reviews_failure_s", 120))
 
     directory_limit = int(CONFIG.get("directory_limit", 20))
     reviews_limit = int(CONFIG.get("reviews_limit", 100))
@@ -80,9 +82,31 @@ def run_lead_generation() -> None:
                     save_json_atomic(state_path, state)
                     continue
 
-                reviews_payload = fetch_reviews_for_user(
-                    client, to_user_id=freelancer_id, limit=reviews_limit, compact=True
-                )
+                try:
+                    reviews_payload = fetch_reviews_for_user(
+                        client, to_user_id=freelancer_id, limit=reviews_limit, compact=True
+                    )
+                except Exception as e:
+                    # Log and skip this freelancer so the job can continue.
+                    append_jsonl(
+                        errors_path,
+                        {
+                            "type": "reviews_fetch_failed",
+                            "freelancer_user_id": freelancer_id,
+                            "offset": offset,
+                            "index_in_page": idx,
+                            "error": str(e),
+                        },
+                    )
+                    print(f"[warn] reviews fetch failed for {freelancer_id}: {e}")
+                    time.sleep(max(0, cooldown_on_reviews_failure_s))
+
+                    directory_state["offset"] = offset
+                    directory_state["index_in_page"] = idx + 1
+                    directory_state["limit"] = directory_limit
+                    save_json_atomic(state_path, state)
+                    continue
+
                 reviewer_ids = sorted(extract_reviewer_ids(reviews_payload))
                 reviewer_count = len(reviewer_ids)
 
@@ -106,22 +130,28 @@ def run_lead_generation() -> None:
                             supabase_rows.append(to_supabase_client_row(uid, minimized))
 
                         # Store to Supabase as soon as we have details
-                        upsert_users(supabase_rows)
+                        ok = upsert_users(supabase_rows)
+                        if not ok:
+                            append_jsonl(
+                                errors_path,
+                                {
+                                    "type": "supabase_upsert_failed",
+                                    "freelancer_user_id": freelancer_id,
+                                    "offset": offset,
+                                    "index_in_page": idx,
+                                    "batch_user_ids": [r.get("id") for r in supabase_rows],
+                                },
+                            )
+                            # If Supabase is the only output, don't mark these as cached yet.
+                            # We'll retry on a future run.
+                            time.sleep(30)
+                            continue
 
                         # Store to local SQLite cache in one transaction per batch
                         user_cache.set_many(cache_rows)
                         user_cache.commit()
 
-                lead_record: Dict[str, Any] = {
-                    "freelancer_user_id": freelancer_id,
-                    "reviewer_ids": reviewer_ids,
-                    "reviewers": [
-                        user_cache.get(rid)
-                        for rid in reviewer_ids
-                        if user_cache.get(rid)
-                    ],
-                }
-                append_jsonl(leads_path, lead_record)
+                # No local leads output; Supabase is the source of truth.
 
                 # Save progress after each user (safe resume)
                 directory_state["offset"] = offset
