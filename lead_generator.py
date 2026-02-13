@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Set
 
 from config import CONFIG
 from http_client import FreelancerApiClient
+from normalize import minimize_user
 from reviews_api import extract_reviewer_ids, fetch_reviews_for_user
 from storage import JsonFileCache, append_jsonl, load_json, save_json_atomic
 from users_api import (
@@ -82,7 +83,7 @@ def run_lead_generation() -> None:
                     users_payload = fetch_users_by_ids(client, batch, compact=True)
                     users_map = extract_users_map(users_payload)
                     for uid, user_obj in users_map.items():
-                        user_cache.set(uid, user_obj)
+                        user_cache.set(uid, minimize_user(user_obj))
                 user_cache.save()
 
             lead_record: Dict[str, Any] = {
