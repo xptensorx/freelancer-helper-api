@@ -90,13 +90,18 @@ def run_lead_generation() -> None:
                 missing = [rid for rid in reviewer_ids if user_cache.get(rid) is None]
                 if missing:
                     for batch in chunked(missing, users_batch_size):
-                        users_payload = fetch_users_by_ids(client, batch, compact=True)
+                        users_payload = fetch_users_by_ids(
+                            client, batch, compact=True, status=True
+                        )
                         users_map = extract_users_map(users_payload)
 
                         supabase_rows = []
                         cache_rows = []
                         for uid, user_obj in users_map.items():
                             minimized = minimize_user(user_obj)
+                            # Skip closed accounts completely (no Supabase, no SQLite cache)
+                            if bool(minimized.get("closed")):
+                                continue
                             cache_rows.append((uid, minimized))
                             supabase_rows.append(to_supabase_client_row(uid, minimized))
 

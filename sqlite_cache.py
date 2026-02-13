@@ -96,6 +96,9 @@ def migrate_json_cache_to_sqlite(json_path: str, sqlite_path: str) -> int:
                 continue
             if not isinstance(v, dict):
                 continue
+            # Skip closed accounts during migration as well
+            if bool(v.get("closed")):
+                continue
             batch.append((uid, v))
             if len(batch) >= 1000:
                 cache.set_many(batch)

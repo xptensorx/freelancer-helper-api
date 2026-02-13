@@ -56,6 +56,7 @@ def fetch_users_by_ids(
     user_ids: Iterable[int],
     *,
     compact: bool = True,
+    status: bool = True,
 ) -> Dict[str, Any]:
     """
     Batch fetch users by ID:
@@ -66,6 +67,9 @@ def fetch_users_by_ids(
     params: List[Tuple[str, Any]] = []
     for uid in user_ids:
         params.append(("users[]", int(uid)))
+    if status:
+        # Ensure we get the full `status` object, not just partial fields.
+        params.append(("status", "true"))
     if compact:
         params.append(("compact", "true"))
     return client.get("/users/0.1/users", params=params)
