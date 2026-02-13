@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
@@ -61,4 +62,61 @@ def minimize_user(user_obj: Dict[str, Any]) -> Dict[str, Any]:
         out.pop("location", None)
 
     return out
+
+
+def to_supabase_client_row(user_id: int, minimized_user: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Map our minimized user payload into your Supabase `public.clients` schema.
+
+    Schema requires NOT NULL:
+    - username, display_name, public_name
+    - location (json), timezone (json), status (json)
+    - joined_at (timestamp without time zone)
+
+    We also explicitly set `id` = Freelancer user_id so upserts are stable.
+    """
+
+    username = (minimized_user.get("username") or "") if isinstance(minimized_user, dict) else ""
+    display_name = (minimized_user.get("display_name") or "") if isinstance(minimized_user, dict) else ""
+    public_name = (minimized_user.get("public_name") or "") if isinstance(minimized_user, dict) else ""
+
+    # Fallbacks to satisfy NOT NULL
+    if not display_name:
+        display_name = username or str(user_id)
+    if not public_name:
+        public_name = display_name
+    if not username:
+        username = display_name
+
+    location = minimized_user.get("location") if isinstance(minimized_user, dict) else None
+    timezone_obj = minimized_user.get("timezone") if isinstance(minimized_user, dict) else None
+    status = minimized_user.get("status") if isinstance(minimized_user, dict) else None
+    if not isinstance(location, dict):
+        location = {}
+    if not isinstance(timezone_obj, dict):
+        timezone_obj = {}
+    if not isinstance(status, dict):
+        status = {}
+
+    reg_ts = minimized_user.get("registration_date") if isinstance(minimized_user, dict) else None
+    joined_at = None
+    try:
+        if reg_ts is not None:
+            joined_at = datetime.fromtimestamp(int(reg_ts), tz=timezone.utc).replace(tzinfo=None)
+    except Exception:
+        joined_at = None
+    if joined_at is None:
+        # last-resort: "now" as naive UTC
+        joined_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+
+    return {
+        "id": int(user_id),
+        "username": username,
+        "display_name": display_name,
+        "public_name": public_name,
+        "location": location,
+        "timezone": timezone_obj,
+        "joined_at": joined_at.isoformat(sep=" "),
+        "status": status,
+    }
 

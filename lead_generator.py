@@ -2,8 +2,9 @@ from typing import Any, Dict, List, Set
 
 from config import CONFIG
 from http_client import FreelancerApiClient
-from normalize import minimize_user
+from normalize import minimize_user, to_supabase_client_row
 from reviews_api import extract_reviews, extract_reviewer_ids, fetch_reviews_for_user
+from supabase_storage import upsert_users
 from storage import JsonFileCache, append_jsonl, load_json, save_json_atomic
 from users_api import (
     extract_user_id,
@@ -92,8 +93,15 @@ def run_lead_generation() -> None:
                 for batch in chunked(missing, users_batch_size):
                     users_payload = fetch_users_by_ids(client, batch, compact=True)
                     users_map = extract_users_map(users_payload)
+
+                    supabase_rows = []
                     for uid, user_obj in users_map.items():
-                        user_cache.set(uid, minimize_user(user_obj))
+                        minimized = minimize_user(user_obj)
+                        user_cache.set(uid, minimized)
+                        supabase_rows.append(to_supabase_client_row(uid, minimized))
+
+                    # Store to Supabase as soon as we have details
+                    upsert_users(supabase_rows)
                 user_cache.save()
 
             lead_record: Dict[str, Any] = {
