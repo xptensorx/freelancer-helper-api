@@ -33,7 +33,7 @@ def minimize_user(user_obj: Dict[str, Any]) -> Dict[str, Any]:
 
     country_name = _get(user_obj, "location", "country", "name")
     city = _get(user_obj, "location", "city")
-    email_verified = _get(user_obj, "status", "email_verified")
+    status_obj = _get(user_obj, "status")
     tz = _get(user_obj, "timezone")
 
     out: Dict[str, Any] = {
@@ -41,18 +41,20 @@ def minimize_user(user_obj: Dict[str, Any]) -> Dict[str, Any]:
         "closed": user_obj.get("closed"),
         "registration_date": user_obj.get("registration_date"),
         "display_name": user_obj.get("display_name"),
+        # Store as { country: "<name>", city: "<city>" }
         "location": {
-            "country": {"name": country_name} if country_name is not None else None,
+            "country": country_name,
             "city": city,
         },
-        "status": {"email_verified": email_verified} if email_verified is not None else None,
+        # Store complete status object from API (not just email_verified)
+        "status": status_obj if isinstance(status_obj, dict) else None,
         "public_name": user_obj.get("public_name"),
         "timezone": tz if isinstance(tz, dict) else None,
         "registration_completed": user_obj.get("registration_completed"),
     }
 
     # Drop None-only containers to keep JSON clean
-    if out["location"]["country"] is None and out["location"]["city"] is None:
+    if out["location"].get("country") is None and out["location"].get("city") is None:
         out["location"] = None
     if out["status"] is None:
         out.pop("status", None)
@@ -114,7 +116,11 @@ def to_supabase_client_row(user_id: int, minimized_user: Dict[str, Any]) -> Dict
         "username": username,
         "display_name": display_name,
         "public_name": public_name,
-        "location": location,
+        # Ensure stored format: { country: <string>, city: <string> }
+        "location": {
+            "country": location.get("country"),
+            "city": location.get("city"),
+        },
         "timezone": timezone_obj,
         "joined_at": joined_at.isoformat(sep=" "),
         "status": status,

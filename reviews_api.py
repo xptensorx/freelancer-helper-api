@@ -38,7 +38,7 @@ def extract_reviews(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(payload.get("reviews"), list):
         return payload["reviews"]
     return []
-
+    
 
 def extract_reviewer_ids(payload: Dict[str, Any]) -> Set[int]:
     """
