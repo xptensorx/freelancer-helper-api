@@ -31,8 +31,13 @@ def extract_users(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     result = payload.get("result") if isinstance(payload, dict) else None
     if isinstance(result, dict) and isinstance(result.get("users"), list):
         return result["users"]
+    if isinstance(result, dict) and isinstance(result.get("users"), dict):
+        # Some endpoints return { "users": { "<id>": {..user..}, ... } }
+        return [u for u in result["users"].values() if isinstance(u, dict)]
     if isinstance(payload.get("users"), list):
         return payload["users"]
+    if isinstance(payload.get("users"), dict):
+        return [u for u in payload["users"].values() if isinstance(u, dict)]
     return []
 
 
@@ -70,12 +75,16 @@ def extract_users_map(payload: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
     """
     Normalize response to a dict: {user_id: user_dict}
     """
-    users = []
+    users: List[Dict[str, Any]] = []
     result = payload.get("result") if isinstance(payload, dict) else None
     if isinstance(result, dict) and isinstance(result.get("users"), list):
         users = result["users"]
+    elif isinstance(result, dict) and isinstance(result.get("users"), dict):
+        users = [u for u in result["users"].values() if isinstance(u, dict)]
     elif isinstance(payload.get("users"), list):
         users = payload["users"]
+    elif isinstance(payload.get("users"), dict):
+        users = [u for u in payload["users"].values() if isinstance(u, dict)]
 
     out: Dict[int, Dict[str, Any]] = {}
     for u in users:

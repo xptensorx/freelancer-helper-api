@@ -18,6 +18,15 @@ def chunked(items: List[int], size: int) -> List[List[int]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+def _freelancer_name(user_obj: Dict[str, Any]) -> str:
+    return (
+        user_obj.get("public_name")
+        or user_obj.get("display_name")
+        or user_obj.get("username")
+        or ""
+    )
+
+
 def run_lead_generation() -> None:
     """
     Process:
@@ -100,6 +109,12 @@ def run_lead_generation() -> None:
             directory_state["index_in_page"] = idx + 1
             directory_state["limit"] = directory_limit
             save_json_atomic(state_path, state)
+
+            print(
+                f"freelancer={freelancer_id} "
+                f"name={_freelancer_name(u)} "
+                f"reviewers_stored={len(reviewer_ids)}"
+            )
 
         # page completed
         offset += directory_limit
