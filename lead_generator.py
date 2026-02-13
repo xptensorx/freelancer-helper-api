@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Set
 from config import CONFIG
 from http_client import FreelancerApiClient
 from normalize import minimize_user
-from reviews_api import extract_reviewer_ids, fetch_reviews_for_user
+from reviews_api import extract_reviews, extract_reviewer_ids, fetch_reviews_for_user
 from storage import JsonFileCache, append_jsonl, load_json, save_json_atomic
 from users_api import (
     extract_user_id,
@@ -83,6 +83,7 @@ def run_lead_generation() -> None:
             reviews_payload = fetch_reviews_for_user(
                 client, to_user_id=freelancer_id, limit=reviews_limit, compact=True
             )
+            review_count = len(extract_reviews(reviews_payload))
             reviewer_ids = sorted(extract_reviewer_ids(reviews_payload))
 
             # Fetch missing reviewer details with caching to reduce API calls
@@ -111,9 +112,10 @@ def run_lead_generation() -> None:
             save_json_atomic(state_path, state)
 
             print(
-                f"freelancer={freelancer_id} "
-                f"name={_freelancer_name(u)} "
-                f"reviewers_stored={len(reviewer_ids)}"
+                f'ID: "{freelancer_id}" '
+                f'Username: "{(u.get("username") or "")}" '
+                f'Public Name: "{(u.get("public_name") or "")}" '
+                f'Reviews: "{review_count}"'
             )
 
         # page completed
