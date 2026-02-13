@@ -1,4 +1,5 @@
 import requests
+from typing import Any, Dict, Optional
 
 from config import CONFIG
 
@@ -17,7 +18,7 @@ def get_headers() -> dict:
     return {"freelancer-oauth-v1": token}
 
 
-def api_get(path: str, *, params: dict | None = None, timeout_s: int = 30):
+def api_get(path: str, *, params: Optional[Dict[str, Any]] = None, timeout_s: int = 30):
     """
     Convenience GET wrapper for Freelancer API.
 
