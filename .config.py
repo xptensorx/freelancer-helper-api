@@ -10,5 +10,4 @@ CONFIG = {
     "client_secret": "<CLIENT_SECRET>",
     "client_redirect": "http://127.0.0.1:8080/authorized",
     "server_base_url": "https://accounts.freelancer-sandbox.com",
-    "oauth_access_token": "<OAUTH_ACCESS_TOKEN>",
 }
