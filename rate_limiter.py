@@ -1,7 +1,7 @@
 import random
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Deque, Optional
 
 
@@ -19,8 +19,8 @@ class RateLimiter:
     requests_per_minute: Optional[int] = 50
     jitter_s: float = 0.2
 
-    _last_ts: float = 0.0
-    _window: Deque[float] = deque()
+    _last_ts: float = field(default=0.0, init=False, repr=False)
+    _window: Deque[float] = field(default_factory=deque, init=False, repr=False)
 
     def wait(self) -> None:
         now = time.monotonic()
