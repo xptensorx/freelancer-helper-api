@@ -3,4 +3,3 @@ state.json
 leads.jsonl
 user_cache.json
 .env
-.env.*
