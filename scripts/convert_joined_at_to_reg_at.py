@@ -18,8 +18,16 @@ Optional env vars:
 """
 
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Ensure imports work even when run outside repo root.
+# Adds the project root (parent of `scripts/`) to sys.path.
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from config import CONFIG
 from supabase_client import get_supabase_client
