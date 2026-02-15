@@ -8,9 +8,10 @@ create table if not exists public.clients (
   public_name character varying not null,
   location json not null,
   timezone json not null,
-  joined_at timestamp without time zone not null,
+  joined_at timestamp without time zone null,
   created_at timestamp with time zone not null default (now() AT TIME ZONE 'utc'::text),
   status json not null,
+  reg_at integer null,
   constraint clients_pkey primary key (id),
   constraint clients_id_key unique (id),
   constraint clients_username_key unique (username)
