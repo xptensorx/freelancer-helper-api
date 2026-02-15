@@ -73,7 +73,8 @@ def to_supabase_client_row(user_id: int, minimized_user: Dict[str, Any]) -> Dict
     Schema requires NOT NULL:
     - username, display_name, public_name
     - location (json), timezone (json), status (json)
-    - joined_at (timestamp without time zone)
+    - joined_at (timestamp without time zone) [nullable in latest schema is OK too]
+    - reg_at (integer) optional (epoch seconds)
 
     We also explicitly set `id` = Freelancer user_id so upserts are stable.
     """
@@ -101,17 +102,20 @@ def to_supabase_client_row(user_id: int, minimized_user: Dict[str, Any]) -> Dict
         status = {}
 
     reg_ts = minimized_user.get("registration_date") if isinstance(minimized_user, dict) else None
+    reg_at: Optional[int] = None
     joined_at = None
     try:
         if reg_ts is not None:
-            joined_at = datetime.fromtimestamp(int(reg_ts), tz=timezone.utc).replace(tzinfo=None)
+            reg_at = int(reg_ts)
+            joined_at = datetime.fromtimestamp(reg_at, tz=timezone.utc).replace(tzinfo=None)
     except Exception:
         joined_at = None
+        reg_at = None
     if joined_at is None:
         # last-resort: "now" as naive UTC
         joined_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
 
-    return {
+    row: Dict[str, Any] = {
         "id": int(user_id),
         "username": username,
         "display_name": display_name,
@@ -125,4 +129,11 @@ def to_supabase_client_row(user_id: int, minimized_user: Dict[str, Any]) -> Dict
         "joined_at": joined_at.isoformat(sep=" "),
         "status": status,
     }
+
+    # From now on, store registration time as integer too (epoch seconds).
+    # Only set it when we have a clean value.
+    if reg_at is not None:
+        row["reg_at"] = reg_at
+
+    return row
 
