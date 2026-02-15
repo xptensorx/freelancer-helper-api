@@ -101,6 +101,7 @@ def main() -> None:
     batch_size = _get_batch_size()
 
     total_updated = 0
+    total_failed = 0
     last_id = 0
     while True:
         # Keyset pagination by id so updates don't cause skipping.
@@ -119,17 +120,25 @@ def main() -> None:
         if not rows:
             break
 
-        updates: List[Dict[str, Any]] = []
+        # Use UPDATE (not UPSERT) to avoid accidental inserts that violate NOT NULL columns.
         for r in rows:
             rid = r.get("id")
             dt = _parse_joined_at(r.get("joined_at"))
             if rid is None or dt is None:
                 continue
-            updates.append({"id": int(rid), "reg_at": _to_epoch_int(dt, unit=unit)})
 
-        if updates:
-            sb.table(table).upsert(updates, on_conflict="id").execute()
-            total_updated += len(updates)
+            reg_at = _to_epoch_int(dt, unit=unit)
+            try:
+                (
+                    sb.table(table)
+                    .update({"reg_at": reg_at})
+                    .eq("id", int(rid))
+                    .is_("reg_at", "null")
+                    .execute()
+                )
+                total_updated += 1
+            except Exception:
+                total_failed += 1
 
         # Advance cursor (regardless of how many were updated)
         try:
@@ -138,6 +147,8 @@ def main() -> None:
             last_id = last_id
 
     print(f"updated rows: {total_updated}")
+    if total_failed:
+        print(f"failed rows: {total_failed}")
     print("convert finished")
 
 
