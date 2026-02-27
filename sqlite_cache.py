@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 
@@ -62,6 +63,147 @@ class SqliteUserCache:
             return
         self.conn.executemany(
             "INSERT OR REPLACE INTO users (user_id, payload_json) VALUES (?, ?)", rows
+        )
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+
+class SqliteCompletedFreelancers:
+    """
+    Track which directory freelancers have been processed.
+
+    Stored in the same SQLite file as `SqliteUserCache` by default (`user_cache.db`),
+    but uses a separate table.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        folder = os.path.dirname(path) or "."
+        os.makedirs(folder, exist_ok=True)
+        self.conn = sqlite3.connect(path)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA synchronous=NORMAL;")
+        self.conn.execute("PRAGMA busy_timeout=5000;")
+
+        # Create new schema (and then migrate older schemas if present).
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS completed_freelancers (
+              id INTEGER PRIMARY KEY,
+              username TEXT,
+              display_name TEXT,
+              location TEXT,
+              completed_at TEXT,
+              offset INTEGER,
+              index_in_page INTEGER,
+              reviewer_count INTEGER,
+              status TEXT NOT NULL
+            )
+            """
+        )
+        self._migrate_schema()
+        self.conn.commit()
+
+    def _migrate_schema(self) -> None:
+        """
+        Best-effort migration for older DBs.
+
+        - rename freelancer_id -> id
+        - rename completed_at_utc -> completed_at
+        - add username/display_name/location columns if missing
+        """
+        try:
+            cols = [
+                str(r[1])
+                for r in self.conn.execute("PRAGMA table_info(completed_freelancers)").fetchall()
+            ]
+        except Exception:
+            return
+
+        # Renames (safe to ignore if already migrated / unsupported)
+        if "freelancer_id" in cols and "id" not in cols:
+            try:
+                self.conn.execute(
+                    "ALTER TABLE completed_freelancers RENAME COLUMN freelancer_id TO id"
+                )
+                cols = [
+                    str(r[1])
+                    for r in self.conn.execute("PRAGMA table_info(completed_freelancers)").fetchall()
+                ]
+            except Exception:
+                pass
+
+        if "completed_at_utc" in cols and "completed_at" not in cols:
+            try:
+                self.conn.execute(
+                    "ALTER TABLE completed_freelancers RENAME COLUMN completed_at_utc TO completed_at"
+                )
+                cols = [
+                    str(r[1])
+                    for r in self.conn.execute("PRAGMA table_info(completed_freelancers)").fetchall()
+                ]
+            except Exception:
+                pass
+
+        # Add missing columns
+        for name, ddl in (
+            ("username", "ALTER TABLE completed_freelancers ADD COLUMN username TEXT"),
+            ("display_name", "ALTER TABLE completed_freelancers ADD COLUMN display_name TEXT"),
+            ("location", "ALTER TABLE completed_freelancers ADD COLUMN location TEXT"),
+            ("completed_at", "ALTER TABLE completed_freelancers ADD COLUMN completed_at TEXT"),
+        ):
+            if name not in cols:
+                try:
+                    self.conn.execute(ddl)
+                except Exception:
+                    pass
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _now_utc_iso() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def mark(
+        self,
+        *,
+        freelancer_id: int,
+        username: Optional[str] = None,
+        display_name: Optional[str] = None,
+        location: Optional[Dict[str, Any]] = None,
+        offset: int,
+        index_in_page: int,
+        reviewer_count: int,
+        status: str,
+    ) -> None:
+        location_json: Optional[str]
+        if isinstance(location, dict):
+            location_json = json.dumps(location, ensure_ascii=False)
+        else:
+            location_json = None
+
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO completed_freelancers
+              (id, username, display_name, location, completed_at, offset, index_in_page, reviewer_count, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(freelancer_id),
+                username,
+                display_name,
+                location_json,
+                self._now_utc_iso(),
+                int(offset),
+                int(index_in_page),
+                int(reviewer_count),
+                str(status),
+            ),
         )
 
     def commit(self) -> None:

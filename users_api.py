@@ -16,10 +16,31 @@ def fetch_directory_page(
 
     Keep params minimal to reduce payload and rate-limit risk.
     """
+    # Payload matches the web request you provided.
     params: List[Tuple[str, Any]] = [
         ("limit", limit),
         ("offset", offset),
         ("query", query),
+        ("reverse_sort", "true"),
+        ("review_count_min", 1),
+        ("sort_field", "review_count"),
+        ("avatar", "true"),
+        ("country_details", "true"),
+        ("display_info", "true"),
+        ("job_ranks", "true"),
+        ("jobs", "true"),
+        ("location_details", "true"),
+        ("online_offline_details", "true"),
+        ("preferred_details", "true"),
+        ("profile_description", "true"),
+        ("pool_details", "true"),
+        ("qualification_details", "true"),
+        ("reputation", "true"),
+        ("rising_star", "true"),
+        ("status", "true"),
+        ("webapp", 1),
+        ("new_errors", "true"),
+        ("new_pools", "true"),
     ]
     if compact:
         params.append(("compact", "true"))

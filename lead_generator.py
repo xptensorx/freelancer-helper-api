@@ -6,7 +6,11 @@ from http_client import FreelancerApiClient
 from normalize import minimize_user, to_supabase_client_row
 from reviews_api import extract_reviewer_ids, fetch_reviews_for_user
 from supabase_storage import upsert_users
-from sqlite_cache import SqliteUserCache, migrate_json_cache_to_sqlite
+from sqlite_cache import (
+    SqliteCompletedFreelancers,
+    SqliteUserCache,
+    migrate_json_cache_to_sqlite,
+)
 from storage import append_jsonl, load_json, save_json_atomic
 from users_api import (
     extract_user_id,
@@ -61,6 +65,8 @@ def run_lead_generation() -> None:
             print(f"[cache] migrated {migrated} users from user_cache.json to {cache_path}")
 
     user_cache = SqliteUserCache(cache_path)
+    completed = SqliteCompletedFreelancers(cache_path)
+    completed_dirty = 0
     try:
         while True:
             payload = fetch_directory_page(
@@ -105,10 +111,27 @@ def run_lead_generation() -> None:
                     directory_state["index_in_page"] = idx + 1
                     directory_state["limit"] = directory_limit
                     save_json_atomic(state_path, state)
+
+                    # Record that we attempted this freelancer but couldn't fetch reviews.
+                    completed.mark(
+                        freelancer_id=freelancer_id,
+                        username=(u.get("username") or None),
+                        display_name=(u.get("display_name") or None),
+                        location=(u.get("location") if isinstance(u.get("location"), dict) else None),
+                        offset=offset,
+                        index_in_page=idx,
+                        reviewer_count=0,
+                        status="reviews_fetch_failed",
+                    )
+                    completed_dirty += 1
+                    if completed_dirty >= 100:
+                        completed.commit()
+                        completed_dirty = 0
                     continue
 
                 reviewer_ids = sorted(extract_reviewer_ids(reviews_payload))
                 reviewer_count = len(reviewer_ids)
+                had_supabase_failure = False
 
                 # Fetch missing reviewer details with caching to reduce API calls
                 missing = [rid for rid in reviewer_ids if user_cache.get(rid) is None]
@@ -132,6 +155,7 @@ def run_lead_generation() -> None:
                         # Store to Supabase as soon as we have details
                         ok = upsert_users(supabase_rows)
                         if not ok:
+                            had_supabase_failure = True
                             append_jsonl(
                                 errors_path,
                                 {
@@ -153,6 +177,21 @@ def run_lead_generation() -> None:
 
                 # No local leads output; Supabase is the source of truth.
 
+                completed.mark(
+                    freelancer_id=freelancer_id,
+                    username=(u.get("username") or None),
+                    display_name=(u.get("display_name") or None),
+                    location=(u.get("location") if isinstance(u.get("location"), dict) else None),
+                    offset=offset,
+                    index_in_page=idx,
+                    reviewer_count=reviewer_count,
+                    status="ok" if not had_supabase_failure else "partial",
+                )
+                completed_dirty += 1
+                if completed_dirty >= 100:
+                    completed.commit()
+                    completed_dirty = 0
+
                 # Save progress after each user (safe resume)
                 directory_state["offset"] = offset
                 directory_state["index_in_page"] = idx + 1
@@ -173,7 +212,13 @@ def run_lead_generation() -> None:
             directory_state["index_in_page"] = 0
             save_json_atomic(state_path, state)
     finally:
+        try:
+            if completed_dirty:
+                completed.commit()
+        except Exception:
+            pass
         user_cache.close()
+        completed.close()
 
 
 if __name__ == "__main__":
