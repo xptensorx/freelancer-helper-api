@@ -1,8 +1,22 @@
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional, Tuple
+
+
+def _connect_sqlite(path: str, *, autocommit: bool) -> sqlite3.Connection:
+    """
+    Open a SQLite connection tuned for long-running jobs.
+    - timeout/busy_timeout: wait for locks instead of failing immediately
+    - WAL: readers won't block writers (and vice versa)
+    """
+    conn = sqlite3.connect(path, timeout=30, isolation_level=None if autocommit else "")
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")  # 30s
+    return conn
 
 
 class SqliteUserCache:
@@ -18,9 +32,8 @@ class SqliteUserCache:
         self.path = path
         folder = os.path.dirname(path) or "."
         os.makedirs(folder, exist_ok=True)
-        self.conn = sqlite3.connect(path)
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
+        # Use transactional mode for batch writes (executemany).
+        self.conn = _connect_sqlite(path, autocommit=False)
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -61,9 +74,19 @@ class SqliteUserCache:
         ]
         if not rows:
             return
-        self.conn.executemany(
-            "INSERT OR REPLACE INTO users (user_id, payload_json) VALUES (?, ?)", rows
-        )
+        # Retry a few times if another connection is briefly writing.
+        for attempt in range(6):
+            try:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO users (user_id, payload_json) VALUES (?, ?)",
+                    rows,
+                )
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e).lower():
+                    raise
+                time.sleep(min(5.0, 0.2 * (2**attempt)))
+        raise sqlite3.OperationalError("database is locked (retries exhausted)")
 
     def commit(self) -> None:
         self.conn.commit()
@@ -81,10 +104,8 @@ class SqliteCompletedFreelancers:
         self.path = path
         folder = os.path.dirname(path) or "."
         os.makedirs(folder, exist_ok=True)
-        self.conn = sqlite3.connect(path)
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
-        self.conn.execute("PRAGMA busy_timeout=5000;")
+        # Autocommit prevents holding a long write transaction, which can lock the users cache.
+        self.conn = _connect_sqlite(path, autocommit=True)
 
         # Create new schema (and then migrate older schemas if present).
         self.conn.execute(
@@ -103,7 +124,7 @@ class SqliteCompletedFreelancers:
             """
         )
         self._migrate_schema()
-        self.conn.commit()
+        # autocommit
 
     def _migrate_schema(self) -> None:
         """
@@ -187,27 +208,36 @@ class SqliteCompletedFreelancers:
         else:
             location_json = None
 
-        self.conn.execute(
-            """
-            INSERT OR REPLACE INTO completed_freelancers
-              (id, username, display_name, location, completed_at, offset, index_in_page, reviewer_count, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(freelancer_id),
-                username,
-                display_name,
-                location_json,
-                self._now_utc_iso(),
-                int(offset),
-                int(index_in_page),
-                int(reviewer_count),
-                str(status),
-            ),
-        )
+        for attempt in range(6):
+            try:
+                self.conn.execute(
+                    """
+                    INSERT OR REPLACE INTO completed_freelancers
+                      (id, username, display_name, location, completed_at, offset, index_in_page, reviewer_count, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(freelancer_id),
+                        username,
+                        display_name,
+                        location_json,
+                        self._now_utc_iso(),
+                        int(offset),
+                        int(index_in_page),
+                        int(reviewer_count),
+                        str(status),
+                    ),
+                )
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e).lower():
+                    raise
+                time.sleep(min(5.0, 0.2 * (2**attempt)))
+        raise sqlite3.OperationalError("database is locked (retries exhausted)")
 
     def commit(self) -> None:
-        self.conn.commit()
+        # autocommit connection; kept for API compatibility
+        return
 
 
 def migrate_json_cache_to_sqlite(json_path: str, sqlite_path: str) -> int:
