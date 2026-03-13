@@ -9,6 +9,15 @@ from oauth import get_headers
 from rate_limiter import RateLimiter
 
 
+class RateLimitExceededError(Exception):
+    """Raised when the API returns 429 Too Many Requests and exit_on_429 is enabled."""
+
+    def __init__(self, message: str, status_code: int = 429, response_text: Optional[str] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
+
+
 ParamsType = Union[Dict[str, Any], List[Tuple[str, Any]]]
 
 
@@ -98,8 +107,18 @@ class FreelancerApiClient:
                 except Exception:
                     last_text = None
 
-                if resp.status_code in (429, 500, 502, 503, 504):
-                    # Rate limit or transient failure
+                if resp.status_code == 429:
+                    exit_on_429 = CONFIG.get("exit_on_429", True)
+                    if exit_on_429:
+                        raise RateLimitExceededError(
+                            "API returned 429 Too Many Requests; exiting.",
+                            status_code=429,
+                            response_text=last_text,
+                        )
+                    sleep_s = self._compute_retry_sleep(resp, attempt)
+                    time.sleep(sleep_s)
+                    continue
+                if resp.status_code in (500, 502, 503, 504):
                     sleep_s = self._compute_retry_sleep(resp, attempt)
                     time.sleep(sleep_s)
                     continue

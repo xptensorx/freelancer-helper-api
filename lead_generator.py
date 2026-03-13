@@ -1,10 +1,11 @@
+import sys
 import time
 from typing import Any, Dict, List
 
 from config import CONFIG
-from http_client import FreelancerApiClient
+from http_client import FreelancerApiClient, RateLimitExceededError
 from normalize import minimize_user, to_supabase_client_row
-from reviews_api import extract_reviewer_ids, fetch_reviews_for_user
+from reviews_api import extract_reviewer_ids, fetch_all_reviews_for_user
 from supabase_storage import upsert_users
 from sqlite_cache import (
     SqliteCompletedFreelancers,
@@ -28,9 +29,9 @@ def chunked(items: List[int], size: int) -> List[List[int]]:
 def run_lead_generation() -> None:
     """
     Process:
-    - Page through freelancer directory until the last user (offset pagination).
+    - Page through freelancer directory (most reviews first) until the last user (offset pagination).
     - For each freelancer user_id:
-      - fetch reviews (large limit, minimal params)
+      - fetch reviews (paginated up to reviews_max, for freelancers with 4000+ reviews)
       - extract reviewer IDs (from_user_id)
       - fetch reviewer user objects (batched + cached)
       - write a JSONL lead record
@@ -43,7 +44,8 @@ def run_lead_generation() -> None:
     cooldown_on_reviews_failure_s = int(CONFIG.get("cooldown_on_reviews_failure_s", 120))
 
     directory_limit = int(CONFIG.get("directory_limit", 20))
-    reviews_limit = int(CONFIG.get("reviews_limit", 100))
+    reviews_max = int(CONFIG.get("reviews_max", 10000))
+    reviews_page_size = int(CONFIG.get("reviews_page_size", 500))
     users_batch_size = int(CONFIG.get("users_batch_size", 50))
 
     state = load_json(
@@ -89,8 +91,12 @@ def run_lead_generation() -> None:
                     continue
 
                 try:
-                    reviews_payload = fetch_reviews_for_user(
-                        client, to_user_id=freelancer_id, limit=reviews_limit, compact=True
+                    reviews_payload = fetch_all_reviews_for_user(
+                        client,
+                        to_user_id=freelancer_id,
+                        max_reviews=reviews_max,
+                        page_size=reviews_page_size,
+                        compact=True,
                     )
                 except Exception as e:
                     # Log and skip this freelancer so the job can continue.
@@ -222,5 +228,9 @@ def run_lead_generation() -> None:
 
 
 if __name__ == "__main__":
-    run_lead_generation()
+    try:
+        run_lead_generation()
+    except RateLimitExceededError as e:
+        print("[fatal] 429 happened — API rate limit exceeded; server shutting down.")
+        sys.exit(1)
 

@@ -8,3 +8,4 @@ user_cache.db-wal
 user_cache.db-shm
 .env
 .env.*
+venv/

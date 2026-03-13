@@ -16,12 +16,12 @@ def fetch_directory_page(
 
     Keep params minimal to reduce payload and rate-limit risk.
     """
-    # Payload matches the web request you provided.
+    # Sort by review_count: reverse_sort=false => most reviews first.
     params: List[Tuple[str, Any]] = [
         ("limit", limit),
         ("offset", offset),
         ("query", query),
-        ("reverse_sort", "true"),
+        ("reverse_sort", "false"),
         ("review_count_min", 1),
         ("sort_field", "review_count"),
         ("avatar", "true"),
